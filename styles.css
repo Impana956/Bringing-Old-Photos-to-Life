@@ -1,0 +1,98 @@
+/* Base UI polish */
+.stApp {
+    background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+}
+
+.app-title {
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: .3px;
+}
+
+.muted {
+    color: #6b7280;
+}
+
+.foot {
+    font-size: 0.85rem;
+    color: #6b7280;
+}
+
+.stDownloadButton>button {
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+.stButton>button {
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+/* Center and enlarge tabs */
+.stTabs [data-baseweb="tab-list"] {
+    justify-content: center;
+    gap: 2rem;
+}
+
+.stTabs [data-baseweb="tab"] {
+    font-size: 1.5rem;
+    font-weight: 700;
+    padding: 1rem 2rem;
+}
+
+/* Theme 1 - Purple */
+.theme1 .stApp {
+    background: linear-gradient(160deg, #ede9fe 0%, #f5f3ff 40%, #faf5ff 100%);
+}
+
+.theme1 .app-title {
+    background: linear-gradient(90deg, #6d28d9, #8b5cf6, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.theme1 .stButton>button,
+.theme1 .stDownloadButton>button {
+    background: linear-gradient(90deg, #7c3aed, #8b5cf6);
+    color: white;
+    border: 0;
+}
+
+/* Theme 2 - Vibrant */
+.theme2 .stApp {
+    background: linear-gradient(145deg, #f0f9ff 0%, #fde68a 35%, #fbcfe8 100%);
+}
+
+.theme2 .app-title {
+    background: linear-gradient(90deg, #f97316, #ef4444, #a855f7, #06b6d4);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.theme2 .stButton>button,
+.theme2 .stDownloadButton>button {
+    background: linear-gradient(90deg, #f97316, #ef4444);
+    color: white;
+    border: 0;
+}
+
+/* Theme 3 - Sunset */
+.theme3 .stApp {
+    background: linear-gradient(160deg, #ffedd5 0%, #fecaca 45%, #e9d5ff 100%);
+}
+
+.theme3 .app-title {
+    background: linear-gradient(90deg, #fb923c, #f43f5e, #8b5cf6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.theme3 .stButton>button,
+.theme3 .stDownloadButton>button {
+    background: linear-gradient(90deg, #fb923c, #f43f5e);
+    color: white;
+    border: 0;
+}

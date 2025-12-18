@@ -19,6 +19,61 @@ import fitz  # PyMuPDF
 import img2pdf
 
 
+def get_aspect_ratio(width: int, height: int) -> str:
+    """Return a user-friendly aspect ratio string.
+
+    Attempt to match to a small set of common aspect ratios (1:1, 4:3, 3:2, 16:9, etc.).
+    If a close match is found (within tolerance), return that simple ratio (e.g. '3:2').
+    Otherwise return a short decimal ratio like '1.50:1'.
+    """
+    if height == 0:
+        return "N/A"
+
+    r = float(width) / float(height)
+
+    # Common aspect ratios to prefer (w, h)
+    common = [
+        (1, 1),
+        (5, 4),
+        (4, 3),
+        (3, 2),
+        (16, 10),
+        (16, 9),
+        (21, 9),
+        (2, 1),
+        (3, 1),
+    ]
+
+    # Find nearest common ratio
+    best = None
+    best_err = None
+    for cw, ch in common:
+        cr = float(cw) / float(ch)
+        err = abs(r - cr)
+        if best is None or err < best_err:
+            best = (cw, ch, cr)
+            best_err = err
+
+    # Use tolerance to decide if a common ratio is a good approximation
+    tol = 0.02  # 2% tolerance
+    if best is not None and best_err is not None and best_err <= tol:
+        return f"{best[0]}:{best[1]}"
+
+    # Otherwise, reduce to small integers if possible (fallback)
+    try:
+        gcd_value = np.gcd(width, height)
+        ratio_w = width // gcd_value
+        ratio_h = height // gcd_value
+        # If reduced numbers are small enough, show them
+        if max(ratio_w, ratio_h) <= 50:
+            return f"{ratio_w}:{ratio_h}"
+    except Exception:
+        pass
+
+    # Final fallback: show short decimal format like '1.50:1'
+    return f"{r:.2f}:1"
+
+
 def compress_image_to_target(img: Image.Image, target_format: str, original_size_bytes: int, preserve_quality: bool = False) -> bytes:
     """
     Compress image to ensure output is smaller than or equal to original size.
@@ -220,7 +275,7 @@ def render_converter_tab():
                     st.session_state.history.insert(0, {
                         "type": "converted",
                         "when": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "size": f"{w}×{h}",
+                        "size": get_aspect_ratio(w, h),
                         "format": format_choice.upper(),
                         "image": thumb,
                         "full": img_np_hist,
@@ -371,7 +426,7 @@ def render_converter_tab():
                         st.session_state.history.insert(0, {
                             "type": "converted",
                             "when": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "size": f"{w}×{h}",
+                            "size": get_aspect_ratio(w, h),
                             "format": format_choice.upper(),
                             "image": thumb,
                             "full": img_np_hist,
@@ -423,7 +478,7 @@ def render_converter_tab():
                         st.session_state.history.insert(0, {
                             "type": "converted",
                             "when": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "size": f"{w}×{h}",
+                            "size": get_aspect_ratio(w, h),
                             "format": format_choice.upper(),
                             "image": thumb,
                             "full": img_np_hist,

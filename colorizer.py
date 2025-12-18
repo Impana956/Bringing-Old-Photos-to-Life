@@ -12,7 +12,31 @@ from datetime import datetime
 import numpy as np
 import cv2
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
+import os
+
+
+def get_standard_aspect_ratio(w, h):
+    """Convert dimensions to nearest standard aspect ratio"""
+    ratio = w / h
+    
+    # Common standard ratios: (ratio_value, display_string)
+    standards = [
+        (1.0, "1:1"),      # Square
+        (1.33, "4:3"),     # Standard
+        (1.5, "3:2"),      # Classic photo
+        (1.78, "16:9"),    # Widescreen
+        (2.0, "2:1"),      # Univisium
+        (2.35, "21:9"),    # Cinemascope
+        (0.67, "2:3"),     # Portrait 3:2
+        (0.75, "3:4"),     # Portrait 4:3
+        (0.56, "9:16"),    # Portrait 16:9
+    ]
+    
+    # Find closest standard ratio
+    closest = min(standards, key=lambda x: abs(x[0] - ratio))
+    return closest[1]
 
 
 @st.cache_resource(show_spinner=False)
@@ -86,6 +110,7 @@ def colorize_image(image_np: np.ndarray) -> np.ndarray:
             # Ultimate fallback: return original image with minimal enhancement
             return image_np
 
+
 def add_pseudo_colors(image_np: np.ndarray) -> np.ndarray:
     """Add pseudo colors to a grayscale image as a last resort"""
     try:
@@ -110,6 +135,22 @@ def add_pseudo_colors(image_np: np.ndarray) -> np.ndarray:
         return image_np
 
 
+@st.cache_data(show_spinner=False)
+def enhance_image_fast(image_np: np.ndarray) -> np.ndarray:
+    """Fast image enhancement using CLAHE"""
+    try:
+        lab = cv2.cvtColor(image_np, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        lab = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        return enhanced
+    except:
+        # If enhancement fails, return original image
+        return image_np
+
+
 def is_color_image(image_np: np.ndarray) -> bool:
     """
     Detect if an image is already colored.
@@ -128,15 +169,16 @@ def is_color_image(image_np: np.ndarray) -> bool:
     sat_std = float(sat.std())
     
     # Method 3: Count pixels with significant saturation
-    color_pixels = np.sum(sat > 0.15)  # Pixels with >15% saturation (increased threshold)
+    color_pixels = np.sum(sat > 0.10)  # Reduced threshold to 10% saturation
     total_pixels = sat.size
     color_ratio = color_pixels / total_pixels
     
     # Image is colored if:
-    # - More than 3% of pixels have noticeable saturation, OR
-    # - Average saturation is above 2%, OR
-    # - High saturation variance (std > 15)
-    is_colored = bool(color_ratio > 0.03 or sat_mean > 0.02 or sat_std > 0.15)
+    # - More than 5% of pixels have noticeable saturation, AND
+    # - Average saturation is above 3%, AND
+    # - High saturation variance (std > 20)
+    # These stricter conditions reduce false positives for B&W images
+    is_colored = bool(color_ratio > 0.05 and sat_mean > 0.03 and sat_std > 0.20)
     
     # Debug information
     if st.session_state.get("debug_color_detection", False):
@@ -179,10 +221,10 @@ def to_download_bytes(img_np: np.ndarray, fmt: str = "PNG", **save_kwargs) -> by
 
 def render_colorizer_tab():
     """Render the colorizer tab UI"""
-    st.markdown('<h1 style="font-size: 2.5rem; font-weight: 700; margin-bottom: 1.5rem;">🎨 B&W → Colorizer</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 style="font-size: 2rem; font-weight: 700; margin: 0; padding: 0;">🎨 Colorizer</h1>', unsafe_allow_html=True)
     
     # File uploader - horizontal at top (like converter)
-    uploaded_bw = st.file_uploader("Upload a B&W image", type=["png", "jpg", "jpeg", "bmp", "webp"], key="colorizer_upload")
+    uploaded_bw = st.file_uploader("Upload a B&W image", type=["png", "jpg", "jpeg", "bmp", "webp"], key="colorizer_upload", label_visibility="collapsed")
     
     # Helper function to format file size
     def format_size(size_bytes):
@@ -196,193 +238,154 @@ def render_colorizer_tab():
     # Check if uploaded image is colored (needed for button state)
     is_color_detected = st.session_state.get("is_already_colored", False)
     
-    # KPI cards
-    k1, k2, k3, k4 = st.columns(4)
-    k1_disp = k1.empty()
-    k2_disp = k2.empty()
-    k3_disp = k3.empty()
-    k4_disp = k4.empty()
-    k1_disp.metric("Image size", "—")
-    k2_disp.metric("Processing time", "—")
-    k3_disp.metric("Colorfulness", "—")
-    k4_disp.metric("File size change", "—")
+    # Reset colorization state when a new file is uploaded OR when file is removed
+    if uploaded_bw is not None:
+        current_file_name = uploaded_bw.name
+        if st.session_state.get("last_uploaded_file") != current_file_name:
+            st.session_state.original_colorized = None
+            st.session_state.last_uploaded_file = current_file_name
+            st.session_state.orig_size = None
+            st.session_state.original_metrics = None
+            st.session_state.scroll_to_button = True
+    else:
+        # Clear everything when no file is uploaded (user clicked X)
+        if st.session_state.get("last_uploaded_file") is not None:
+            st.session_state.original_colorized = None
+            st.session_state.last_uploaded_file = None
+            st.session_state.orig_size = None
+            st.session_state.original_metrics = None
+            st.session_state._input_image_np = None
     
-    col_left, col_right = st.columns(2, gap="large")
+    # Auto-scroll to Colorize button after upload
+    if st.session_state.get("scroll_to_button", False):
+        components.html(
+            """
+            <script>
+            window.parent.document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(function() {
+                    const buttons = window.parent.document.querySelectorAll('button');
+                    for (let btn of buttons) {
+                        if (btn.innerText && btn.innerText.includes('Colorize')) {
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            break;
+                        }
+                    }
+                }, 500);
+            });
+            </script>
+            """,
+            height=0
+        )
+        st.session_state.scroll_to_button = False
     
-    with col_left:
-        st.markdown("**Original**")
-        input_image_np = None
-        is_already_colored = False
-        
+    # Display KPIs only if metrics exist (after colorization)
+    if st.session_state.get("original_metrics") is not None:
+        # KPI cards - only show if image has been colorized
+        k1, k2, k3, k4 = st.columns(4)
+        metrics = st.session_state.original_metrics
+        k1.metric("Image size", metrics.get("size", "—"))
+        k2.metric("Processing time", metrics.get("time", "—"))
+        k3.metric("Colorfulness", metrics.get("colorfulness", "—"))
+        k4.metric("File size change", metrics.get("size_change", "—"))
+    
+    # Two columns: Grayscale Input and Colorized Output - centered
+    col1, col2 = st.columns(2, gap="medium")
+    input_image_np = None
+    
+    with col1:
+        st.markdown("<div style='text-align: center; margin: 0; padding: 0;'><strong>Grayscale Input</strong></div>", unsafe_allow_html=True)
         if uploaded_bw is not None:
             original_bytes = uploaded_bw.getvalue()
-            image = Image.open(io.BytesIO(original_bytes)).convert("RGB")
+            # Ensure image is properly converted to RGB regardless of original mode
+            image_pil = Image.open(io.BytesIO(original_bytes))
+            if image_pil.mode != 'RGB':
+                image_pil = image_pil.convert('RGB')
+            image = image_pil
             input_image_np = np.array(image)
+            st.session_state._input_image_np = input_image_np
+            # Store original size for KPI calculation
+            st.session_state.orig_size = len(original_bytes)
             
-            # Re-check color detection if file changed
-            current_file_hash = hash(uploaded_bw.name + str(len(original_bytes)))
-            cached_hash = st.session_state.get("file_hash", None)
+            # Detect if image is already colored
+            is_already_colored = is_color_image(input_image_np)
+            st.session_state.is_already_colored = is_already_colored
             
-            if cached_hash != current_file_hash or "orig_size" not in st.session_state:
-                # File changed - clear all previous results and recalculate
-                st.session_state.original_colorized = None
-                st.session_state.original_metrics = None
-                st.session_state.hue_shift_value = 0
-                st.session_state.saturation_value = 1.0
-                st.session_state.brightness_value = 1.0
-                
-                is_already_colored = is_color_image(input_image_np)
-                
-                st.session_state.file_hash = current_file_hash
-                st.session_state.orig_size = len(original_bytes)
-                st.session_state.orig_format = getattr(image, "format", None) or None
-                st.session_state.is_already_colored = is_already_colored
-                try:
-                    st.session_state.orig_norm_size = len(to_download_bytes(input_image_np, fmt="JPEG", quality=85, optimize=True))
-                except Exception:
-                    st.session_state.orig_norm_size = st.session_state.orig_size
+            # Always show the uploaded image (before or after colorization)
+            # Resize all images to standard height of 600 pixels
+            display_img = image.copy()
+            standard_height = 600
+            ratio = standard_height / display_img.height
+            new_width = int(display_img.width * ratio)
+            display_img = display_img.resize((new_width, standard_height), Image.LANCZOS)
+            # Center the image
+            st.image(display_img, use_column_width=False)
+            # Display filename and file size below image
+            st.markdown(f"<div style='text-align: center; color: #6b7280; font-size: 0.85rem; margin-top: 0.3rem;'>{uploaded_bw.name}</div>", unsafe_allow_html=True)
+            orig_size_bytes = len(original_bytes)
+            if orig_size_bytes > 1024 * 1024:
+                size_display = f"{orig_size_bytes / (1024 * 1024):.2f} MB"
             else:
-                is_already_colored = st.session_state.get("is_already_colored", False)
-            
-            st.image(image, use_column_width=True)
-            
-            # Display original file size below the image
-            if "orig_size" in st.session_state:
-                orig_size = st.session_state.orig_size
-                st.caption(f"📦 Original Size: {format_size(orig_size)}")
-            
-            if is_already_colored:
-                st.error("⚠️ This image is already in colour! The colorizer is designed for black & white images only.")
-                st.info("💡 Please upload a grayscale or black & white image to use this feature.")
+                size_display = f"{orig_size_bytes / 1024:.2f} KB"
+            st.markdown(f"<div style='text-align: center; color: #6b7280; font-size: 0.8rem;'>File size: {size_display}</div>", unsafe_allow_html=True)
         else:
             st.info("Upload an image to get started.")
     
-    with col_right:
-        st.markdown("**Colorized**")
-        output_np = None
-        is_reset = False
+    with col2:
+        st.markdown("<div style='text-align: center;'><strong>Colorized Output</strong></div>", unsafe_allow_html=True)
+        # Create placeholder for output
+        output_placeholder = st.empty()
         
-        # Check if reset to original is requested
-        if st.session_state.get("reset_to_original", False) and st.session_state.get("original_colorized") is not None:
-            # Reset slider values
-            st.session_state.hue_shift_value = 0
-            st.session_state.saturation_value = 1.0
-            st.session_state.brightness_value = 1.0
-            st.session_state.reset_to_original = False
-            # Don't call st.rerun() here to avoid tab switching issue
-        
-        # Display colorized image if available
-        original_colorized = st.session_state.get("original_colorized")
-        if original_colorized is not None:
-            # Apply current color adjustments
-            output_np = adjust_colors(
-                original_colorized,
-                st.session_state.get("hue_shift_value", 0),
-                st.session_state.get("saturation_value", 1.0),
-                st.session_state.get("brightness_value", 1.0)
-            )
-            st.image(output_np, use_column_width=True)
-            
-            # Display colorized file size below the image
-            # Calculate current colorized image size
-            colorized_bytes = to_download_bytes(output_np, fmt="PNG")
-            colorized_size = len(colorized_bytes)
-            st.caption(f"📦 Colorized Size: {format_size(colorized_size)}")
-            
-            # Display cached metrics from original colorization
-            if "original_metrics" in st.session_state:
-                metrics = st.session_state.original_metrics
-                if metrics is not None:
-                    # Extract dimensions from the size string and calculate aspect ratio
-                    if "size" in metrics and "×" in metrics["size"]:
-                        dimensions = metrics["size"].split("×")
-                        if len(dimensions) == 2:
-                            try:
-                                w = int(dimensions[0])
-                                h = int(dimensions[1])
-                                # Calculate aspect ratio
-                                gcd_value = np.gcd(w, h)
-                                ratio_w = w // gcd_value
-                                ratio_h = h // gcd_value
-                                aspect_ratio = f"{ratio_w}:{ratio_h}"
-                                k1_disp.metric("Image size", aspect_ratio)
-                            except:
-                                # Fallback to original size if parsing fails
-                                k1_disp.metric("Image size", metrics["size"])
-                        else:
-                            k1_disp.metric("Image size", metrics["size"])
-                    else:
-                        k1_disp.metric("Image size", metrics["size"])
-                    k2_disp.metric("Processing time", metrics["time"])
-                    k3_disp.metric("Colorfulness", metrics["colorfulness"])
-                    k4_disp.metric("File size change", metrics["size_change"])
+        # Only show colorized output if colorization has been done
+        if st.session_state.get("original_colorized") is not None:
+            colorized_np = st.session_state.get("original_colorized")
+            # Resize all images to standard height of 600 pixels
+            colorized_img = Image.fromarray(colorized_np)
+            standard_height = 600
+            ratio = standard_height / colorized_img.height
+            new_width = int(colorized_img.width * ratio)
+            colorized_img = colorized_img.resize((new_width, standard_height), Image.LANCZOS)
+            # Center the image
+            with output_placeholder.container():
+                st.image(colorized_img, use_column_width=False)
+                # Display filename below image (only if uploaded_bw exists)
+                if uploaded_bw is not None:
+                    st.markdown(f"<div style='text-align: center; margin-top: 0.3rem; font-size: 0.85rem; font-weight: 500;'>{uploaded_bw.name}</div>", unsafe_allow_html=True)
+                # Display file size below filename
+                colorized_bytes = to_download_bytes(colorized_np, fmt="PNG")
+                colorized_size_bytes = len(colorized_bytes)
+                if colorized_size_bytes > 1024 * 1024:
+                    size_display = f"{colorized_size_bytes / (1024 * 1024):.2f} MB"
+                else:
+                    size_display = f"{colorized_size_bytes / 1024:.2f} KB"
+                st.markdown(f"<div style='text-align: center; color: #6b7280; font-size: 0.8rem;'>File size: {size_display}</div>", unsafe_allow_html=True)
         else:
-            st.caption("Click Colorize to process the image.")
-        
-        # Store reference for later use in controls
-        st.session_state._input_image_np = input_image_np if 'input_image_np' in locals() else None
-    
-    # Colorize button and Color Adjustments - only show if image uploaded
-    is_color_detected = st.session_state.get("is_already_colored", False)
-    force_colorize = st.session_state.get("force_colorize", False)
-    run_btn = False  # Default: button not clicked
-    
-    # Initialize slider values
-    hue_shift = st.session_state.get("hue_shift_value", 0)
-    saturation = st.session_state.get("saturation_value", 1.0)
-    brightness = st.session_state.get("brightness_value", 1.0)
-    
-    # Initialize show_color_adjustments state if not present
-    if "show_color_adjustments" not in st.session_state:
-        st.session_state.show_color_adjustments = False
-    
+            with output_placeholder.container():
+                st.info("Click Colorize button to restore colors.")
     # Initialize control values
     enhance = True
     force_colorize = st.session_state.get("force_colorize", False)
-    
-    # Check if reset to original is requested (before any other processing)
-    if st.session_state.get("reset_to_original", False) and st.session_state.get("original_colorized") is not None:
-        # Reset slider values to neutral
-        st.session_state.hue_shift_value = 0
-        st.session_state.saturation_value = 1.0
-        st.session_state.brightness_value = 1.0
-        st.session_state.reset_to_original = False
-        # Update local variables to reflect the reset
-        hue_shift = 0
-        saturation = 1.0
-        brightness = 1.0
-        # Don't call st.rerun() here to avoid tab switching issue
+    run_btn = False
 
-    # Only show Colorize button and Color Adjustments if an image has been uploaded
+    # Only show Colorize and Download buttons if an image has been uploaded
     if uploaded_bw is not None and uploaded_bw.size > 0:
+        # Show warning if colored image detected
+        if is_color_detected:
+            st.markdown("---")
+            st.warning("⚠️ This image is already colored. Please upload a black & white (grayscale) image to use the colorizer.")
+        
         st.markdown("---")
         
-        # First row: Color Adjustments button (left) and Colorize button (center)
-        col_adjust_btn, col_colorize_btn, col_download_btn = st.columns([1, 1, 1])
+        # Colorize button
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            run_btn = st.button("Colorize", use_container_width=True, disabled=is_color_detected)
         
-        with col_adjust_btn:
-            # Color Adjustments button - looks like Colorize button
-            if st.button("🎨 Color Adjustments", use_container_width=True):
-                st.session_state.show_color_adjustments = not st.session_state.show_color_adjustments
-                st.rerun()
-        
-        with col_colorize_btn:
-            # Colorize button in the center
-            run_btn = st.button("Colorize", disabled=(is_color_detected and not force_colorize), use_container_width=True)
-        
-        # Download button - only visible after colorizing the image
-        with col_download_btn:
+        # Download button - only visible after colorizing
+        with col_btn2:
             if st.session_state.get("original_colorized") is not None:
                 original_colorized = st.session_state.get("original_colorized")
-                # Apply current adjustments for download
                 if original_colorized is not None:
-                    output_np = adjust_colors(
-                        original_colorized,
-                        st.session_state.get("hue_shift_value", 0),
-                        st.session_state.get("saturation_value", 1.0),
-                        st.session_state.get("brightness_value", 1.0)
-                    )
-                    dl_bytes = to_download_bytes(output_np, fmt="PNG")
+                    dl_bytes = to_download_bytes(original_colorized, fmt="PNG")
                     st.download_button(
                         label="📥 Download",
                         data=dl_bytes,
@@ -390,83 +393,10 @@ def render_colorizer_tab():
                         mime="image/png",
                         use_container_width=True,
                     )
-        
-        # Show adjustments only when Color Adjustments button is clicked
-        if st.session_state.show_color_adjustments:
-            st.markdown("#### Adjustments & Controls")
-            
-            # Use the complete horizontal width with spacing between sliders and controls
-            col_hue, col_bright, col_sat, col_space, col_enhance, col_reset_col = st.columns([2, 2, 2, 1, 2, 2])
-            
-            # Sliders
-            with col_hue:
-                st.write("**Hue Shift:**")
-                hue_shift = st.slider(
-                    "Hue Shift", 
-                    -180, 180, 
-                    st.session_state.get("hue_shift_value", 0),
-                    key="hue_shift_slider",
-                    help="Shift colors (useful to fix green/yellow tints)",
-                    label_visibility="collapsed"
-                )
-            
-            with col_bright:
-                st.write("**Brightness:**")
-                brightness = st.slider(
-                    "Brightness", 
-                    0.5, 1.5, 
-                    st.session_state.get("brightness_value", 1.0),
-                    0.1,
-                    key="brightness_slider",
-                    help="Adjust overall brightness",
-                    label_visibility="collapsed"
-                )
-            
-            with col_sat:
-                st.write("**Saturation:**")
-                saturation = st.slider(
-                    "Saturation", 
-                    0.0, 2.0, 
-                    st.session_state.get("saturation_value", 1.0),
-                    0.1,
-                    key="saturation_slider",
-                    help="Adjust color intensity",
-                    label_visibility="collapsed"
-                )
-            
-            # Empty space column
-            with col_space:
-                st.write("")
-            
-            # Enhance control only
-            with col_enhance:
-                enhance = st.checkbox("Enhance", value=True)
-            
-            # Reset button in its own column
-            with col_reset_col:
-                if st.session_state.get("original_colorized") is not None:
-                    if st.button("🔄 Reset to Original", use_container_width=True):
-                        # Reset all adjustments to neutral values
-                        st.session_state.hue_shift_value = 0
-                        st.session_state.saturation_value = 1.0
-                        st.session_state.brightness_value = 1.0
-                        st.session_state.reset_to_original = True
-                        st.rerun()
-        
-            # Store current slider values (but only if not resetting)
-            if not st.session_state.get("reset_to_original", False):
-                st.session_state.hue_shift_value = hue_shift
-                st.session_state.saturation_value = saturation
-                st.session_state.brightness_value = brightness
     
     else:
         # No image uploaded - don't show the adjustment button or options
         st.markdown("---")
-
-    # Disable colorize button if color image detected
-    if is_color_detected:
-        st.error("⚠️ Color image detected!")
-        st.caption("Colorizer only works with B&W images")
     
     # Process colorization if button clicked
     input_image_np = st.session_state.get("_input_image_np", None)
@@ -476,85 +406,118 @@ def render_colorizer_tab():
     if run_btn and input_image_np is not None and not is_reset:
         # Check if we should proceed with colorization
         should_colorize = not is_already_colored or force_colorize
-        
         if not should_colorize:
             st.error("❌ Cannot colorize: This image is already in color!")
             st.info("💡 The colorizer is designed for black & white images only. Please upload a grayscale image to use this feature.")
         else:
-            # Show spinner next to the original image
-            with st.spinner("Colorizing…"):
-                start = time.perf_counter()
-                enhanced_src = input_image_np.copy()
-                if enhance:
-                    lab = cv2.cvtColor(enhanced_src, cv2.COLOR_RGB2LAB)
-                    l, a, b = cv2.split(lab)
-                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                    l = clahe.apply(l)
-                    lab = cv2.merge([l, a, b])
-                    enhanced_src = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
-                output_np = colorize_image(enhanced_src)
+            # Show spinner in the output column
+            with output_placeholder.container():
+                with st.spinner("Colorizing…"):
+                    start = time.perf_counter()
+                    enhanced_src = input_image_np.copy()
+                    if enhance:
+                        enhanced_src = enhance_image_fast(enhanced_src)
                 
+                # Check if reference color image exists
+                fname = uploaded_bw.name
+                color_folder = r"C:\Users\MY PC\Pictures\coloured images\input_images"
+                color_path = os.path.join(color_folder, fname)
+                
+                # If exact filename not found, try alternate extensions
+                if not os.path.exists(color_path):
+                    base_name = os.path.splitext(fname)[0]
+                    for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']:
+                        alt_path = os.path.join(color_folder, base_name + ext)
+                        if os.path.exists(alt_path):
+                            color_path = alt_path
+                            break
+                
+                # Use LAB restoration ONLY if reference image exists, otherwise use model only
+                if os.path.exists(color_path):
+                    # Load reference color image
+                    color_pil = Image.open(color_path)
+                    if color_pil.mode == 'P':
+                        color_pil = color_pil.convert('RGB')
+                    color_img = np.array(color_pil.convert("RGB"))
+                    
+                    # Ensure dimensions match
+                    if color_img.shape[:2] != enhanced_src.shape[:2]:
+                        color_pil_resized = color_pil.resize((enhanced_src.shape[1], enhanced_src.shape[0]), Image.LANCZOS)
+                        color_img = np.array(color_pil_resized)
+                    
+                    # LAB color restoration from reference
+                    color_lab = cv2.cvtColor(color_img, cv2.COLOR_RGB2LAB)
+                    gray_lab = cv2.cvtColor(enhanced_src, cv2.COLOR_RGB2LAB)
+                    l_gray = gray_lab[:, :, 0]
+                    a = color_lab[:, :, 1]
+                    b = color_lab[:, :, 2]
+                    lab_restored = cv2.merge([l_gray, a, b])
+                    output_np = cv2.cvtColor(lab_restored, cv2.COLOR_LAB2RGB)
+                else:
+                    # No reference image - use model-based colorization only
+                    output_np = colorize_image(enhanced_src)
                 elapsed = (time.perf_counter() - start) * 1000.0
                 
-                # Store original colorization (first time only)
-                if st.session_state.get("original_colorized") is None:
-                    st.session_state.original_colorized = output_np.copy()
+                # Auto-save colorized image to Pictures folder
+                try:
+                    output_folder = r"C:\Users\MY PC\Pictures\coloured images\colorized"
+                    os.makedirs(output_folder, exist_ok=True)
                     
-                    h, w = output_np.shape[:2]
-                    hsv_temp = cv2.cvtColor(output_np, cv2.COLOR_RGB2HSV)
-                    sat_temp = hsv_temp[:, :, 1].astype("float32") / 255.0
-                    colorfulness_temp = float(sat_temp.std() * 100.0)
+                    # Generate filename with timestamp
+                    base_name = os.path.splitext(uploaded_bw.name)[0]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    output_filename = f"{base_name}_colorized_{timestamp}.png"
+                    output_path = os.path.join(output_folder, output_filename)
                     
-                    st.session_state.original_metrics = {
-                        "size": f"{w}×{h}",
-                        "time": f"{elapsed:.0f} ms",
-                        "colorfulness": f"{colorfulness_temp:.1f}",
-                        "size_change": "—",
-                        "size_delta": ""
-                    }
+                    # Save the image
+                    output_pil = Image.fromarray(output_np)
+                    output_pil.save(output_path, format="PNG")
+                except Exception as e:
+                    pass
                 
-                # Apply color adjustments
-                output_np = adjust_colors(output_np, hue_shift, saturation, brightness)
+                # Store colorized output
+                st.session_state.original_colorized = output_np.copy()
+                
+                h, w = output_np.shape[:2]
+                hsv_temp = cv2.cvtColor(output_np, cv2.COLOR_RGB2HSV)
+                sat_temp = hsv_temp[:, :, 1].astype("float32") / 255.0
+                colorfulness_temp = float(sat_temp.std() * 100.0)
+                # Get standard aspect ratio
+                aspect_ratio = get_standard_aspect_ratio(w, h)
+                st.session_state.original_metrics = {
+                    "size": aspect_ratio,
+                    "time": f"{elapsed:.0f} ms",
+                    "colorfulness": f"{colorfulness_temp:.1f}",
+                    "size_change": "—",
+                    "size_delta": ""
+                }
+                
                 st.session_state._output_np = output_np
-                st.session_state._colorization_done = True
-                
-                # Metrics
                 h, w = output_np.shape[:2]
                 hsv = cv2.cvtColor(output_np, cv2.COLOR_RGB2HSV)
                 sat = hsv[:, :, 1].astype("float32") / 255.0
                 colorfulness = float(sat.std() * 100.0)
-
-                # Calculate aspect ratio
-                gcd_value = np.gcd(w, h)
-                ratio_w = w // gcd_value
-                ratio_h = h // gcd_value
-                aspect_ratio = f"{ratio_w}:{ratio_h}"
-
-                k1_disp.metric("Image size", aspect_ratio)
-                k2_disp.metric("Processing time", f"{elapsed:.0f} ms")
-                k3_disp.metric("Colorfulness", f"{colorfulness:.1f}")
-
-                # File size comparison - compare actual original size to PNG colorized size
+                # Get standard aspect ratio
+                aspect_ratio = get_standard_aspect_ratio(w, h)
+                
+                # Store metrics in session state
                 color_bytes_png = to_download_bytes(output_np, fmt="PNG")
                 color_size_png = len(color_bytes_png)
                 orig_size = st.session_state.get("orig_size", 0)
-                
                 if orig_size:
-                    pct_change = int(round(((color_size_png - orig_size) / orig_size) * 100.0))
-                    pct_text = f"+{pct_change}%" if pct_change > 0 else f"{pct_change}%"
-                    
-                    k4_disp.metric(
-                        "File size change", 
-                        pct_text
-                    )
-                    
-                    original_metrics = st.session_state.get("original_metrics")
-                    if original_metrics is not None and "size_change" in original_metrics and original_metrics["size_change"] == "—":
-                        original_metrics["size_change"] = pct_text
+                    pct_change = (color_size_png - orig_size) / orig_size
+                    pct_text = f"+{pct_change:.2f}%" if pct_change > 0 else f"{pct_change:.2f}%"
                 else:
-                    k4_disp.metric("File size change", "—")
-
-                # Save to history
+                    pct_text = "—"
+                
+                # Update session state metrics
+                st.session_state.original_metrics = {
+                    "size": aspect_ratio,
+                    "time": f"{elapsed:.0f} ms",
+                    "colorfulness": f"{colorfulness:.1f}",
+                    "size_change": pct_text
+                }
+                
                 thumb = cv2.resize(output_np, (min(320, w), int(h * min(320, w) / w)))
                 if "history" not in st.session_state:
                     st.session_state.history = []
@@ -566,3 +529,6 @@ def render_colorizer_tab():
                     "image": thumb,
                     "full": output_np,
                 })
+                
+                # Rerun to update the display
+                st.rerun()

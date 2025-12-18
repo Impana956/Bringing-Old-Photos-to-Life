@@ -135,3 +135,7 @@ dmypy.json
 
 # Deprecated application file
 run_app_depricated.py
+# Model files
+models/
+*.model
+*.pth

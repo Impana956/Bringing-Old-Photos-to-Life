@@ -27,7 +27,7 @@ st.markdown(
     """
     <style>
     /* Base UI polish */
-    .stApp {background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);}    
+    .stApp {background: linear-gradient(180deg, #e8f0fe 0%, #f0e7ff 50%, #ffffff 100%) !important;}    
     .app-title {font-size: 2.2rem; font-weight: 700; letter-spacing: .3px;}
     .muted {color: #6b7280;}
     .foot {font-size: 0.85rem; color: #6b7280;}
@@ -236,7 +236,7 @@ if "original_colorized" not in st.session_state:
 
 # ---------- Header ----------
 st.markdown('<div class="app-title" style="text-align: center;">🎨 Colour & Convert</div>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center; color: #6b7280; margin-bottom: 2rem;">Colorize black & white photos and convert image formats - all in one place.</p>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center; color: #6b7280; margin-bottom: 2rem;">Colorize photos and convert image formats - all in one place.</p>', unsafe_allow_html=True)
 
 # ---------- Main Tabs ----------
 tab_colorizer, tab_converter, tab_history = st.tabs(["🎨 Colorizer", "🔄 Format Converter", "📂 History"])
@@ -250,7 +250,7 @@ with tab_colorizer:
     
     with col_sidebar:
         st.markdown("### Controls")
-        theme = st.selectbox("Themes", ["Theme1", "Theme2", "Theme3"], index=0, key="colorizer_theme")
+        theme = st.selectbox("Themes", ["Light", "Theme1", "Theme2", "Theme3"], index=0, key="colorizer_theme")
         uploaded_bw = st.file_uploader("Upload a B&W image", type=["png", "jpg", "jpeg", "bmp", "webp"], key="colorizer_upload")
         enhance = st.checkbox("Enhance contrast", value=True)
         run_btn = st.button("Colorize")
@@ -269,10 +269,18 @@ with tab_colorizer:
     
     # Apply theme
     css = ""
-    if theme == "Theme1":
+    if theme == "Light":
         css = """
         <style>
-            .stApp {background: linear-gradient(160deg, #ede9fe 0%, #f5f3ff 40%, #faf5ff 100%);} 
+            .stApp {background: linear-gradient(180deg, #e8f0fe 0%, #f0e7ff 50%, #ffffff 100%) !important;} 
+            .app-title {background: linear-gradient(90deg,#5b6fd8,#7c4dff); -webkit-background-clip:text; background-clip:text; color: transparent;}
+            .stButton>button, .stDownloadButton>button {background: linear-gradient(90deg,#5b6fd8,#7c4dff); color: white; border: 0;}
+        </style>
+        """
+    elif theme == "Theme1":
+        css = """
+        <style>
+            .stApp {background: linear-gradient(160deg, #ede9fe 0%, #f5f3ff 40%, #faf5ff 100%) !important;} 
             .app-title {background: linear-gradient(90deg,#6d28d9,#8b5cf6,#a78bfa); -webkit-background-clip:text; background-clip:text; color: transparent;}
             .stButton>button, .stDownloadButton>button {background: linear-gradient(90deg,#7c3aed,#8b5cf6); color: white; border: 0;}
         </style>
@@ -280,7 +288,7 @@ with tab_colorizer:
     elif theme == "Theme2":
         css = """
         <style>
-            .stApp {background: linear-gradient(145deg, #f0f9ff 0%, #fde68a 35%, #fbcfe8 100%);} 
+            .stApp {background: linear-gradient(145deg, #f0f9ff 0%, #fde68a 35%, #fbcfe8 100%) !important;} 
             .app-title {background: linear-gradient(90deg,#f97316,#ef4444,#a855f7,#06b6d4); -webkit-background-clip:text; background-clip:text; color: transparent;}
             .stButton>button, .stDownloadButton>button {background: linear-gradient(90deg,#f97316,#ef4444); color: white; border: 0;}
         </style>
@@ -288,7 +296,7 @@ with tab_colorizer:
     elif theme == "Theme3":
         css = """
         <style>
-            .stApp {background: linear-gradient(160deg, #ffedd5 0%, #fecaca 45%, #e9d5ff 100%);} 
+            .stApp {background: linear-gradient(160deg, #ffedd5 0%, #fecaca 45%, #e9d5ff 100%) !important;} 
             .app-title {background: linear-gradient(90deg,#fb923c,#f43f5e,#8b5cf6); -webkit-background-clip:text; background-clip:text; color: transparent;}
             .stButton>button, .stDownloadButton>button {background: linear-gradient(90deg,#fb923c,#f43f5e); color: white; border: 0;}
         </style>

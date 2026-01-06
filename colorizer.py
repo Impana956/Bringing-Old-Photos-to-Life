@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 """
-Colorizer Module
-Handles B&W image colorization functionality
+Colorizer module - handles the B&W to color conversion
+Using pre-trained neural network for colorization
 """
 
 import io
@@ -18,36 +15,36 @@ import os
 
 
 def get_standard_aspect_ratio(w, h):
-    """Convert dimensions to nearest standard aspect ratio"""
+    
     ratio = w / h
     
-    # Common standard ratios: (ratio_value, display_string)
+    # common ratios
     standards = [
-        (1.0, "1:1"),      # Square
-        (1.33, "4:3"),     # Standard
-        (1.5, "3:2"),      # Classic photo
-        (1.78, "16:9"),    # Widescreen
-        (2.0, "2:1"),      # Univisium
-        (2.35, "21:9"),    # Cinemascope
-        (0.67, "2:3"),     # Portrait 3:2
-        (0.75, "3:4"),     # Portrait 4:3
-        (0.56, "9:16"),    # Portrait 16:9
+        (1.0, "1:1"),
+        (1.33, "4:3"),
+        (1.5, "3:2"),      # most cameras use this
+        (1.78, "16:9"),
+        (2.0, "2:1"),
+        (2.35, "21:9"),
+        (0.67, "2:3"),
+        (0.75, "3:4"),
+        (0.56, "9:16"),
     ]
     
-    # Find closest standard ratio
     closest = min(standards, key=lambda x: abs(x[0] - ratio))
     return closest[1]
 
 
 @st.cache_resource(show_spinner=False)
 def load_colorization_net():
-    """Load the pre-trained colorization neural network"""
+    """Load the colorization model (cached so it only loads once)"""
     prototxt = r"models\model_colorization.prototxt"
     model = r"models\colorization_model.model"
     points = r"models\pts_in_hull.npy"
     net = cv2.dnn.readNetFromCaffe(prototxt, model)
     pts = np.load(points)
 
+    # setup the network layers
     class8 = net.getLayerId("class8_ab")
     conv8 = net.getLayerId("conv8_313_rh")
     pts = pts.transpose().reshape(2, 313, 1, 1)
@@ -58,10 +55,10 @@ def load_colorization_net():
 
 @st.cache_data(show_spinner=False)
 def colorize_image(image_np: np.ndarray) -> np.ndarray:
-    """Colorize a grayscale image using deep learning"""
+    """Run colorization on grayscale image using neural net"""
     try:
         net = load_colorization_net()
-        # Convert to grayscale → RGB to stabilize tones (model expects L channel)
+        # convert to grayscale first to normalize
         img = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
@@ -69,7 +66,7 @@ def colorize_image(image_np: np.ndarray) -> np.ndarray:
         lab = cv2.cvtColor(scaled, cv2.COLOR_RGB2LAB)
         resized = cv2.resize(lab, (224, 224))
         L = cv2.split(resized)[0]
-        L -= 50
+        L -= 50  # mean centering
         net.setInput(cv2.dnn.blobFromImage(L))
         ab = net.forward()[0, :, :, :].transpose((1, 2, 0))
         ab = cv2.resize(ab, (img.shape[1], img.shape[0]))
@@ -80,64 +77,51 @@ def colorize_image(image_np: np.ndarray) -> np.ndarray:
         colorized = (255 * colorized).astype("uint8")
         return colorized
     except Exception as e:
-        # If colorization fails, return a properly colored version using a different approach
         if st.session_state.get("debug_color_detection", False):
             st.warning(f"Colorization model issue: {str(e)}")
         else:
             st.warning(f"Colorization model issue: {str(e)[:50]}...")
         
-        # Fallback: enhance the image with a more sophisticated approach
+        # try simpler approach if model fails
         try:
-            # Try to boost colors more effectively
             hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV).astype("float32")
-            # Boost saturation more aggressively but with limits
             hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.5, 0, 255)
-            # Slightly boost value (brightness) as well
             hsv[:, :, 2] = np.clip(hsv[:, :, 2] * 1.1, 0, 255)
             result = cv2.cvtColor(hsv.astype("uint8"), cv2.COLOR_HSV2RGB)
             
-            # If the result is still very similar to original, try a different approach
             orig_gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
             result_gray = cv2.cvtColor(result, cv2.COLOR_RGB2GRAY)
             if np.allclose(orig_gray, result_gray, atol=10):
-                # Add some artificial color variation
                 result = add_pseudo_colors(image_np)
             
             return result
         except Exception as fallback_e:
             if st.session_state.get("debug_color_detection", False):
                 st.error(f"Fallback colorization also failed: {str(fallback_e)}")
-            # Ultimate fallback: return original image with minimal enhancement
             return image_np
 
 
 def add_pseudo_colors(image_np: np.ndarray) -> np.ndarray:
-    """Add pseudo colors to a grayscale image as a last resort"""
+   
     try:
-        # Convert to LAB
         lab = cv2.cvtColor(image_np, cv2.COLOR_RGB2LAB)
         l, a, b = cv2.split(lab)
         
-        # Create artificial color channels based on luminance variations
-        # This creates a blue/white/red effect based on brightness
-        a_channel = (l.astype(float) - 128) * 0.5  # Blue-red channel
-        b_channel = (l.astype(float) - 128) * 0.3  # Green-magenta channel
+        a_channel = (l.astype(float) - 128) * 0.5
+        b_channel = (l.astype(float) - 128) * 0.3
         
-        # Combine channels
         colored_lab = cv2.merge([l, a_channel.astype(np.uint8), b_channel.astype(np.uint8)])
         colored_rgb = cv2.cvtColor(colored_lab, cv2.COLOR_LAB2RGB)
         
-        # Blend with original to keep it subtle
         blended = cv2.addWeighted(image_np, 0.7, colored_rgb, 0.3, 0)
         return blended
     except:
-        # If all else fails, return the original image
         return image_np
 
 
 @st.cache_data(show_spinner=False)
 def enhance_image_fast(image_np: np.ndarray) -> np.ndarray:
-    """Fast image enhancement using CLAHE"""
+    """Boost contrast using CLAHE"""
     try:
         lab = cv2.cvtColor(image_np, cv2.COLOR_RGB2LAB)
         l, a, b = cv2.split(lab)
@@ -147,40 +131,30 @@ def enhance_image_fast(image_np: np.ndarray) -> np.ndarray:
         enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
         return enhanced
     except:
-        # If enhancement fails, return original image
         return image_np
 
 
 def is_color_image(image_np: np.ndarray) -> bool:
-    """
-    Detect if an image is already colored.
-    Returns True if the image has significant color information.
-    Uses multiple methods for robust detection.
-    """
-    # Method 1: Check if image is truly grayscale (R=G=B everywhere)
+    """Check if image has color or is grayscale"""
+    # first check if all channels are the same (grayscale)
     r, g, b = image_np[:, :, 0], image_np[:, :, 1], image_np[:, :, 2]
     if np.allclose(r, g, atol=5) and np.allclose(g, b, atol=5):
-        return False  # Pure grayscale (with small tolerance)
+        return False
     
-    # Method 2: Check saturation in HSV space
+    # check saturation in HSV
     hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV)
     sat = hsv[:, :, 1].astype("float32") / 255.0
     sat_mean = float(sat.mean())
     sat_std = float(sat.std())
     
-    # Method 3: Count pixels with significant saturation
-    color_pixels = np.sum(sat > 0.10)  # Reduced threshold to 10% saturation
+    # count pixels with color
+    color_pixels = np.sum(sat > 0.10)
     total_pixels = sat.size
     color_ratio = color_pixels / total_pixels
     
-    # Image is colored if:
-    # - More than 5% of pixels have noticeable saturation, AND
-    # - Average saturation is above 3%, AND
-    # - High saturation variance (std > 20)
-    # These stricter conditions reduce false positives for B&W images
+    
     is_colored = bool(color_ratio > 0.05 and sat_mean > 0.03 and sat_std > 0.20)
     
-    # Debug information
     if st.session_state.get("debug_color_detection", False):
         st.sidebar.write(f"Color Detection Debug:")
         st.sidebar.write(f"  Color Ratio: {color_ratio:.4f}")

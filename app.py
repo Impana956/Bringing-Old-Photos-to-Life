@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-"""
-Colour & Convert - Image Processing Application
-Main entry point
-"""
 
 import os
 import pickle
@@ -13,13 +6,13 @@ from colorizer import render_colorizer_tab, to_download_bytes
 from converter import render_converter_tab
 import math
 
-# History file path
-HISTORY_FILE = os.path.join(os.path.dirname(__file__), ".app_history.pkl")
-WELCOME_FILE = os.path.join(os.path.dirname(__file__), ".welcome_dismissed.pkl")
-TAB_FILE = os.path.join(os.path.dirname(__file__), ".active_tab.pkl")
+# Files for storing user session data
+HISTORY_FILE = os.path.join(os.path.dirname(__file__), 'history.pkl')
+WELCOME_FILE = os.path.join(os.path.dirname(__file__), 'welcome.pkl')
+TAB_FILE = os.path.join(os.path.dirname(__file__), 'active_tab.pkl')
 
 def load_history():
-    """Load history from disk"""
+    """Load saved history if it exists"""
     try:
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'rb') as f:
@@ -29,9 +22,8 @@ def load_history():
     return []
 
 def save_history(history):
-    """Save history to disk, keeping only last 10 items"""
+    """Save history but keep only last 10"""
     try:
-        # Keep only the 10 most recent items
         history_to_save = history[:10]
         with open(HISTORY_FILE, 'wb') as f:
             pickle.dump(history_to_save, f)
@@ -39,7 +31,6 @@ def save_history(history):
         pass
 
 def load_welcome_status():
-    """Load welcome dismissed status from disk"""
     try:
         if os.path.exists(WELCOME_FILE):
             with open(WELCOME_FILE, 'rb') as f:
@@ -49,7 +40,6 @@ def load_welcome_status():
     return False
 
 def save_welcome_status(dismissed):
-    """Save welcome dismissed status to disk"""
     try:
         with open(WELCOME_FILE, 'wb') as f:
             pickle.dump(dismissed, f)
@@ -57,7 +47,7 @@ def save_welcome_status(dismissed):
         pass
 
 def load_active_tab():
-    """Load active tab from disk"""
+    """Get the last tab user was on"""
     try:
         if os.path.exists(TAB_FILE):
             with open(TAB_FILE, 'rb') as f:
@@ -67,7 +57,6 @@ def load_active_tab():
     return "🎨 Colorizer"
 
 def save_active_tab(tab_name):
-    """Save active tab to disk"""
     try:
         with open(TAB_FILE, 'wb') as f:
             pickle.dump(tab_name, f)
@@ -377,15 +366,6 @@ if "uploaded_format" not in st.session_state:
     st.session_state.uploaded_format = None
 if "original_colorized" not in st.session_state:
     st.session_state.original_colorized = None
-if "show_welcome" not in st.session_state:
-    st.session_state.show_welcome = not load_welcome_status()
-
-# Auto-save history when it changes
-if "last_history_len" not in st.session_state:
-    st.session_state.last_history_len = len(st.session_state.history)
-elif st.session_state.last_history_len != len(st.session_state.history):
-    save_history(st.session_state.history)
-    st.session_state.last_history_len = len(st.session_state.history)
 
 # Initialize theme
 if "colorizer_theme" not in st.session_state:
@@ -394,6 +374,19 @@ if "colorizer_theme" not in st.session_state:
 # Initialize active tab - persist across refreshes by loading from disk
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = load_active_tab()
+
+# Initialize show_welcome - only show on first visit, not on refreshes
+if "show_welcome" not in st.session_state:
+    welcome_dismissed = load_welcome_status()
+    # Show welcome only if never dismissed before
+    st.session_state.show_welcome = not welcome_dismissed
+
+# Auto-save history when it changes
+if "last_history_len" not in st.session_state:
+    st.session_state.last_history_len = len(st.session_state.history)
+elif st.session_state.last_history_len != len(st.session_state.history):
+    save_history(st.session_state.history)
+    st.session_state.last_history_len = len(st.session_state.history)
 
 # ==================== WELCOME PAGE ====================
 if st.session_state.show_welcome:
@@ -528,7 +521,7 @@ if st.session_state.show_welcome:
     with col2:
         if st.button("🚀 Get Started", use_container_width=True, type="primary"):
             st.session_state.show_welcome = False
-            save_welcome_status(True)
+            save_welcome_status(True)  # Save to disk so welcome never shows again
             st.session_state.active_tab = "🎨 Colorizer"
             save_active_tab("🎨 Colorizer")
             st.rerun()

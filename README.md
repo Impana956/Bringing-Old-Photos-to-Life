@@ -6,9 +6,7 @@ A comprehensive Streamlit application that combines image colorization and forma
 
 ### 🎨 B&W Colorizer
 - Transform black & white images into vibrant color photos
-- Uses deep learning colorization model (OpenCV Caffe)
-- Multiple visual themes (Purple, Vibrant, Sunset)
-- Contrast enhancement option
+- Uses deep learning colorization model 
 - Processing history with gallery view
 - Performance metrics (processing time, colorfulness score)
 

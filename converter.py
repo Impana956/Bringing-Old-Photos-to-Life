@@ -2,8 +2,7 @@
 # coding: utf-8
 
 """
-Converter Module
-Handles image format conversion and PDF conversion functionality
+Converter module - image format conversion and PDF stuff
 """
 
 import os
@@ -54,45 +53,36 @@ def get_aspect_ratio(width: int, height: int) -> str:
             best = (cw, ch, cr)
             best_err = err
 
-    # Use tolerance to decide if a common ratio is a good approximation
-    tol = 0.02  # 2% tolerance
+    tol = 0.02
     if best is not None and best_err is not None and best_err <= tol:
         return f"{best[0]}:{best[1]}"
 
-    # Otherwise, reduce to small integers if possible (fallback)
     try:
         gcd_value = np.gcd(width, height)
         ratio_w = width // gcd_value
         ratio_h = height // gcd_value
-        # If reduced numbers are small enough, show them
         if max(ratio_w, ratio_h) <= 50:
             return f"{ratio_w}:{ratio_h}"
     except Exception:
         pass
 
-    # Final fallback: show short decimal format like '1.50:1'
     return f"{r:.2f}:1"
 
 
 def compress_image_to_target(img: Image.Image, target_format: str, original_size_bytes: int, preserve_quality: bool = False) -> bytes:
-    """
-    Compress image to ensure output is smaller than or equal to original size.
-    If preserve_quality is True, prioritize quality over size reduction.
-    """
+    """Compress image so output isn't bigger than input"""
     if target_format == "bmp":
-        # BMP is uncompressed, just save it
         buf = io.BytesIO()
         img.save(buf, "BMP")
         return buf.getvalue()
     
     elif target_format == "jpg":
         if preserve_quality:
-            # Maximum quality for PDF conversion
             buf = io.BytesIO()
-            img.save(buf, "JPEG", quality=98, optimize=True, subsampling=0)  # Highest quality settings
+            img.save(buf, "JPEG", quality=98, optimize=True, subsampling=0)
             return buf.getvalue()
         
-        # Try progressively lower quality until file is smaller than original
+        # try different quality levels until we get under original size
         for quality in [90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30]:
             buf = io.BytesIO()
             img.save(buf, "JPEG", quality=quality, optimize=True)
